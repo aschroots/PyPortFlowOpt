@@ -1,0 +1,48 @@
+# Ruff configuration for PyPortFlowOpt.
+#
+# Encodes the mechanical/syntactic conventions observed in the sibling PyPortFlow1/
+# PyPortFlow2 projects (double quotes, ~100-110 char lines, stdlib/third-party/local
+# import grouping, pathlib over os.path, modern `X | None` union syntax) as enforced
+# rules instead of documentation. Run `ruff check --fix .` and `ruff format .` rather
+# than relying on manual discipline; see code-style.md for the conventions that can't
+# be expressed as a lint rule.
+#
+# No src/ layout exists yet -- once the package is created, add it below so first-party
+# imports are grouped correctly by the isort rules.
+
+target-version = "py311"
+line-length = 110
+src = ["src"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes -- unused imports/vars, undefined names, etc.
+    "I",   # isort -- import sorting/grouping
+    "UP",  # pyupgrade -- modern syntax, e.g. `X | None` over `Optional[X]`
+    "B",   # flake8-bugbear -- common bug patterns
+    "PTH", # flake8-use-pathlib -- flags os.path usage in favor of pathlib.Path
+]
+ignore = [
+    # Docstrings are intentionally selective, not required on every public function/
+    # class (see code-style.md) -- do not enable the "D" (pydocstyle) rule set, it
+    # assumes the opposite policy.
+]
+
+[lint.isort]
+combine-as-imports = true
+known-first-party = ["pyportflowopt"]
+
+# Not enabled, worth deciding on deliberately rather than defaulting to:
+# - "ANN" (flake8-annotations) only checks that type hints are PRESENT, not correct --
+#   real type checking needs a separate tool (mypy/pyright), a decision this config
+#   doesn't make for you.
+# - Relative-vs-absolute local imports (PyPortFlow2 prefers relative, PyPortFlow1
+#   prefers absolute) has no "require relative" ruff rule, only "ban relative"
+#   (lint.flake8-tidy-imports.ban-relative-imports) -- so that convention, if you want
+#   one, has to stay documented rather than enforced.

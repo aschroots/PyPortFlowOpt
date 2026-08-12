@@ -1,0 +1,10 @@
+marketProxyTicker: SPY
+marketProxyName: "S&P 500 Test Proxy"
+priceInputKind: prices
+perfWndw: 10
+perfWndwShft: 10
+doBcktest: true
+bckTestWndw: 6
+shortPortfolio: true
+shortLimit: -0.3
+factorModels: [CAPM, FF3, FFC4, FF5, FF5Mod, FFC6]

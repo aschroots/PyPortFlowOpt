@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyportflowopt"
+version = "0.1.0"
+description = "Multi-model portfolio optimization and rolling backtest tool"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "PyYAML>=6.0",
+    "packaging>=23.0",
+    "pyportfolioopt>=1.5",
+    "cvxpy>=1.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+
+[project.scripts]
+pyportflowopt = "pyportflowopt.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

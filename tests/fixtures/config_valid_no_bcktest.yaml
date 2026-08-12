@@ -1,0 +1,6 @@
+priceInputKind: prices
+perfWndw: 10
+perfWndwShft: 10
+doBcktest: false
+shortPortfolio: false
+factorModels: [CAPM]
