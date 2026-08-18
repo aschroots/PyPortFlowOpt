@@ -53,6 +53,7 @@ class OptimizationRecord:
     bckTestDelForeReal: float
     YrPremRealMkt: float
     bckTestPremRealMkt: float
+    weights: dict[str, float] | None = None
 
 
 def _model_order(records: Sequence[OptimizationRecord], catalog_order: Sequence[str]) -> list[str]:
@@ -127,3 +128,49 @@ def build_sharpe_history_table(
             row[f"{m}ShrtShrp"] = shrt_shrp.get(key, {}).get(f"{m}ShrtShrp", float("nan"))
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+STAT_ROW_LABELS: tuple[str, ...] = ("YrExpR", "YrExpVol", "YrExpShrp")
+
+
+def build_weights_tables(
+    records: Sequence[OptimizationRecord],
+    portfolio_type: str,
+    tickers: Sequence[str],
+    catalog_order: Sequence[str],
+) -> dict[str, pd.DataFrame]:
+    """Returns {model_name: df} for every model present among `portfolio_type` records
+    (Simp first, then catalog_order). Each df is a "Ticker" column plus one column per
+    window (perfWndwNum, in chronological generation order). The first 3 rows are always
+    YrExpR/YrExpVol/YrExpShrp (that window+model's annualized forecast stats, read straight
+    off the record); the remaining rows are one per ticker, that model's optimized weight. A
+    ticker missing from a record's own `weights` dict -- excluded from that window's
+    optimization, or the whole optimization failed (weights is None) -- is NaN, same as the
+    stat rows in a failed-optimization column. Ticker rows are partitioned so tickers with a
+    nonzero weight in at least one window sort first, tickers that are always 0.0/NaN sort
+    last; original ticker order is preserved within each partition.
+    """
+    filtered = [r for r in records if r.PortfolioType == portfolio_type]
+    models = _model_order(filtered, catalog_order)
+
+    tables: dict[str, pd.DataFrame] = {}
+    for model in models:
+        model_records = [r for r in filtered if r.Model == model]
+
+        weight_data = {
+            r.perfWndwNum: [(r.weights or {}).get(ticker, float("nan")) for ticker in tickers]
+            for r in model_records
+        }
+        weights_df = pd.DataFrame(weight_data, index=list(tickers))
+
+        ever_nonzero = weights_df.fillna(0.0).gt(0.0).any(axis=1)
+        ordered = [t for t in tickers if ever_nonzero[t]] + [t for t in tickers if not ever_nonzero[t]]
+        weights_df = weights_df.loc[ordered]
+
+        stat_data = {r.perfWndwNum: [getattr(r, field) for field in STAT_ROW_LABELS] for r in model_records}
+        stats_df = pd.DataFrame(stat_data, index=list(STAT_ROW_LABELS))
+
+        combined = pd.concat([stats_df, weights_df])
+        combined.index.name = "Ticker"
+        tables[model] = combined.reset_index()
+    return tables

@@ -68,12 +68,23 @@ def test_golden_path_writes_all_expected_output_files(fixtures_dir, tmp_path):
         "OptResultsShrtPmodPval.csv",
         "OptResultsShrtPvalPmod.csv",
         "SharpeHistory.csv",
+        "WtsLngSimp.csv",
+        "WtsLngCAPM.csv",
+        "WtsLngFF3.csv",
+        "WtsLngFFC4.csv",
+        "WtsLngFF5.csv",
+        "WtsLngFF5Mod.csv",
+        "WtsLngFFC6.csv",
         "run_summary_20240101_120000.log",
     ]
     for filename in expected_files:
         assert (output_dir / filename).exists(), filename
 
+    assert not list(output_dir.glob("WtsShrt*.csv"))  # long-only scope for this feature
+
     assert result.run_summary_path == output_dir / "run_summary_20240101_120000.log"
+    assert set(result.weights_lng_paths) == {"Simp", "CAPM", "FF3", "FFC4", "FF5", "FF5Mod", "FFC6"}
+    assert result.weights_lng_paths["Simp"] == output_dir / "WtsLngSimp.csv"
 
     sharpe_history = pd.read_csv(output_dir / "SharpeHistory.csv")
     assert list(sharpe_history.columns[:5]) == [
@@ -88,6 +99,19 @@ def test_golden_path_writes_all_expected_output_files(fixtures_dir, tmp_path):
     lng_pmod_pval = pd.read_csv(output_dir / "OptResultsLngPmodPval.csv")
     assert "SimpYrExpR" in lng_pmod_pval.columns
     assert "CAPMYrExpR" in lng_pmod_pval.columns
+
+    weights_simp = pd.read_csv(output_dir / "WtsLngSimp.csv")
+    assert weights_simp.columns[0] == "Ticker"
+    assert list(weights_simp["Ticker"][:3]) == ["YrExpR", "YrExpVol", "YrExpShrp"]
+    assert set(weights_simp["Ticker"][3:]) == {"AAA", "BBB", "CCC", "DDD"}
+    assert len(weights_simp) == 3 + 4  # 3 stat rows + 4 tickers
+    assert len(weights_simp.columns) == 1 + 5  # "Ticker" + 4 backtest windows + Final
+    ticker_weights = weights_simp[~weights_simp["Ticker"].isin(["YrExpR", "YrExpVol", "YrExpShrp"])]
+    window_cols = [c for c in weights_simp.columns if c != "Ticker"]
+    for col in window_cols:
+        values = ticker_weights[col]
+        if values.notna().any():  # skip windows where this model's optimization failed
+            assert values.sum(skipna=True) == pytest.approx(1.0)
 
 
 def test_golden_path_final_row_has_nan_realized_fields_but_populated_forecast(fixtures_dir, tmp_path):

@@ -29,7 +29,12 @@ from .optimization import (
     optimize_portfolio,
 )
 from .output_writing import write_output_csv
-from .results import OptimizationRecord, build_results_tables, build_sharpe_history_table
+from .results import (
+    OptimizationRecord,
+    build_results_tables,
+    build_sharpe_history_table,
+    build_weights_tables,
+)
 from .returns import detect_periods_per_year
 from .run_summary import RunSummary, write_run_summary
 from .windowing import (
@@ -56,6 +61,7 @@ class RunResult:
     opt_results_lng_pval_pmod_path: Path
     opt_results_shrt_pmod_pval_path: Path | None
     opt_results_shrt_pval_pmod_path: Path | None
+    weights_lng_paths: dict[str, Path]
 
 
 def _nan_record(
@@ -312,6 +318,7 @@ def run(
                         bckTestDelForeReal=bcktest_del_fore_real,
                         YrPremRealMkt=yr_prem_real_mkt,
                         bckTestPremRealMkt=bcktest_prem_real_mkt,
+                        weights=outcome.weights,
                     )
                 )
 
@@ -333,6 +340,15 @@ def run(
         shrt_pval_pmod_path = output_dir / "OptResultsShrtPvalPmod.csv"
         write_output_csv(shrt_pmod_pval_path, shrt_pmod_pval)
         write_output_csv(shrt_pval_pmod_path, shrt_pval_pmod)
+
+    lng_weights_tables = build_weights_tables(
+        records, LONG_PORTFOLIO_TYPE, tuple(securities_data.returns.columns), catalog_order
+    )
+    weights_lng_paths: dict[str, Path] = {}
+    for model_name, weights_df in lng_weights_tables.items():
+        weights_path = output_dir / f"WtsLng{model_name}.csv"
+        write_output_csv(weights_path, weights_df)
+        weights_lng_paths[model_name] = weights_path
 
     sharpe_history = build_sharpe_history_table(records, catalog_order)
     sharpe_history_path = output_dir / "SharpeHistory.csv"
@@ -368,4 +384,5 @@ def run(
         opt_results_lng_pval_pmod_path=lng_pval_pmod_path,
         opt_results_shrt_pmod_pval_path=shrt_pmod_pval_path,
         opt_results_shrt_pval_pmod_path=shrt_pval_pmod_path,
+        weights_lng_paths=weights_lng_paths,
     )

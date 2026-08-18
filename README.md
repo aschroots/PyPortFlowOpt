@@ -148,6 +148,19 @@ Written into `--output-dir/runOpt_YYYYMMDD_HHMMSS/` (see the note above):
 - `SharpeHistory.csv` — the same id columns, then `<model>LngShrp` per model (and
   `<model>ShrtShrp` per model if `shortPortfolio: true`) — each window's annualized
   `YrExpShrp`.
+- `WtsLng<Model>.csv` (e.g. `WtsLngSimp.csv`, `WtsLngCAPM.csv`) — one file per
+  expected-return model (`Simp` plus every configured `factorModels` entry), long-only
+  portfolio only. Transposed from the other outputs: a `Ticker` column plus one column per
+  window (`perfWndwNum`, chronological, `Final` last). The first 3 rows are always
+  `YrExpR`/`YrExpVol`/`YrExpShrp` — that window's annualized forecast return, volatility,
+  and Sharpe ratio for the model, the same numbers as in `OptResultsLng*.csv`/
+  `SharpeHistory.csv`, just relocated here for convenience. The remaining rows are one per
+  ticker, holding that model's optimized weight in each window: blank when the ticker was
+  excluded from that window's optimization (coverage gap) or the optimization failed
+  outright, `0.0` when the ticker was included but received no allocation. Ticker rows are
+  sorted with any ticker that had a nonzero weight in at least one window first, followed by
+  tickers that were always `0.0`/excluded; original ticker order (securities CSV column
+  order) is preserved within each group.
 - `run.log` — full DEBUG-level trace of the run (root logger, so `cvxpy`/`pyportfolioopt`
   solver warnings are captured too).
 - `run_summary_YYYYMMDD_HHMMSS.log` — a `PyPortFlowOpt Run Summary` title followed by

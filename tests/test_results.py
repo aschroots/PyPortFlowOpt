@@ -2,20 +2,25 @@ from __future__ import annotations
 
 import datetime as dt
 
+import pandas as pd
 import pytest
 
 from pyportflowopt.results import (
     ID_FIELDS,
+    STAT_ROW_LABELS,
     VALUE_FIELDS,
     OptimizationRecord,
     build_results_tables,
     build_sharpe_history_table,
+    build_weights_tables,
 )
 
 _CATALOG_ORDER = ("CAPM", "FF3", "FFC4", "FF5", "FF5Mod", "FFC6")
 
 
-def _record(perf_wndw_num, model, portfolio_type, base_value=1.0, **overrides) -> OptimizationRecord:
+def _record(
+    perf_wndw_num, model, portfolio_type, base_value=1.0, weights=None, **overrides
+) -> OptimizationRecord:
     values = {field: base_value for field in VALUE_FIELDS}
     values.update(overrides)
     return OptimizationRecord(
@@ -26,6 +31,7 @@ def _record(perf_wndw_num, model, portfolio_type, base_value=1.0, **overrides) -
         bckTestEnd=dt.date(2020, 4, 1),
         Model=model,
         PortfolioType=portfolio_type,
+        weights=weights,
         **values,
     )
 
@@ -137,3 +143,104 @@ def test_build_sharpe_history_table_preserves_window_generation_order():
     ]
     table = build_sharpe_history_table(records, _CATALOG_ORDER)
     assert list(table["perfWndwNum"]) == [1, 2, "Final"]
+
+
+def _ticker_rows(table):
+    return table[~table["Ticker"].isin(STAT_ROW_LABELS)]
+
+
+def test_build_weights_tables_distinguishes_excluded_from_zero_weight():
+    records = [
+        _record(1, "Simp", "Lng", weights={"AAA": 0.6, "BBB": 0.4}),
+        _record(2, "Simp", "Lng", weights={"AAA": 0.0, "BBB": 0.6, "CCC": 0.4}),
+    ]
+    table = build_weights_tables(records, "Lng", ("AAA", "BBB", "CCC"), _CATALOG_ORDER)["Simp"]
+
+    ccc_window1 = table.loc[table["Ticker"] == "CCC", 1].iloc[0]
+    assert pd.isna(ccc_window1)  # excluded from window 1's optimization
+
+    aaa_window2 = table.loc[table["Ticker"] == "AAA", 2].iloc[0]
+    assert aaa_window2 == pytest.approx(0.0)  # included, optimizer assigned exactly 0.0
+
+
+def test_build_weights_tables_failed_optimization_is_all_nan_column():
+    nan = float("nan")
+    records = [
+        _record(1, "Simp", "Lng", weights={"AAA": 1.0}),
+        _record(2, "Simp", "Lng", weights=None, base_value=nan),
+    ]
+    table = build_weights_tables(records, "Lng", ("AAA",), _CATALOG_ORDER)["Simp"]
+    assert table[2].isna().all()
+
+
+def test_build_weights_tables_ticker_never_covered_is_all_nan_row_and_sinks_to_bottom():
+    records = [_record(1, "Simp", "Lng", weights={"AAA": 1.0})]
+    table = build_weights_tables(records, "Lng", ("AAA", "ZZZ"), _CATALOG_ORDER)["Simp"]
+    ticker_rows = _ticker_rows(table)
+    assert list(ticker_rows["Ticker"]) == ["AAA", "ZZZ"]
+    assert ticker_rows.loc[ticker_rows["Ticker"] == "ZZZ", 1].isna().all()
+
+
+def test_build_weights_tables_nonzero_tickers_sort_before_always_zero_tickers():
+    records = [
+        _record(1, "Simp", "Lng", weights={"AAA": 0.0, "BBB": 0.5, "CCC": 0.0, "DDD": 0.5}),
+    ]
+    table = build_weights_tables(records, "Lng", ("AAA", "BBB", "CCC", "DDD"), _CATALOG_ORDER)["Simp"]
+    ticker_rows = _ticker_rows(table)
+    assert list(ticker_rows["Ticker"]) == ["BBB", "DDD", "AAA", "CCC"]
+
+
+def test_build_weights_tables_columns_preserve_window_generation_order():
+    records = [
+        _record(1, "Simp", "Lng", weights={"AAA": 1.0}),
+        _record(2, "Simp", "Lng", weights={"AAA": 1.0}),
+        _record("Final", "Simp", "Lng", weights={"AAA": 1.0}),
+    ]
+    table = build_weights_tables(records, "Lng", ("AAA",), _CATALOG_ORDER)["Simp"]
+    assert list(table.columns)[1:] == [1, 2, "Final"]
+
+
+def test_build_weights_tables_returns_dict_per_model_in_catalog_order():
+    records = [
+        _record(1, "FF3", "Lng", weights={"AAA": 1.0}),
+        _record(1, "Simp", "Lng", weights={"AAA": 1.0}),
+        _record(1, "CAPM", "Lng", weights={"AAA": 1.0}),
+    ]
+    result = build_weights_tables(records, "Lng", ("AAA",), _CATALOG_ORDER)
+    assert list(result.keys()) == ["Simp", "CAPM", "FF3"]
+
+
+def test_build_weights_tables_filters_by_portfolio_type():
+    records = [
+        _record(1, "Simp", "Lng", weights={"AAA": 1.0}),
+        _record(1, "Simp", "Shrt", weights={"AAA": 0.5}),
+    ]
+    lng_result = build_weights_tables(records, "Lng", ("AAA",), _CATALOG_ORDER)
+    shrt_result = build_weights_tables(records, "Shrt", ("AAA",), _CATALOG_ORDER)
+    assert lng_result["Simp"].loc[lng_result["Simp"]["Ticker"] == "AAA", 1].iloc[0] == pytest.approx(1.0)
+    assert shrt_result["Simp"].loc[shrt_result["Simp"]["Ticker"] == "AAA", 1].iloc[0] == pytest.approx(0.5)
+
+
+def test_build_weights_tables_first_column_is_ticker():
+    records = [_record(1, "Simp", "Lng", weights={"AAA": 1.0})]
+    table = build_weights_tables(records, "Lng", ("AAA",), _CATALOG_ORDER)["Simp"]
+    assert table.columns[0] == "Ticker"
+
+
+def test_build_weights_tables_leading_rows_are_the_forecast_stats():
+    records = [
+        _record(
+            1,
+            "Simp",
+            "Lng",
+            weights={"AAA": 1.0},
+            YrExpR=0.08,
+            YrExpVol=0.14,
+            YrExpShrp=0.57,
+        )
+    ]
+    table = build_weights_tables(records, "Lng", ("AAA",), _CATALOG_ORDER)["Simp"]
+    assert list(table["Ticker"][:3]) == ["YrExpR", "YrExpVol", "YrExpShrp"]
+    assert table.loc[table["Ticker"] == "YrExpR", 1].iloc[0] == pytest.approx(0.08)
+    assert table.loc[table["Ticker"] == "YrExpVol", 1].iloc[0] == pytest.approx(0.14)
+    assert table.loc[table["Ticker"] == "YrExpShrp", 1].iloc[0] == pytest.approx(0.57)
