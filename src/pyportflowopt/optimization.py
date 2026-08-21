@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 from pypfopt import exceptions as pypfopt_exceptions
 from pypfopt.efficient_frontier import EfficientFrontier
@@ -106,3 +107,28 @@ def optimize_portfolio(
         return OptimizationOutcome(
             success=False, weights=None, mu_p=None, sigma_p=None, sharpe=None, failure_reason=str(exc)
         )
+
+
+def apply_weight_epsilon(weights: dict[str, float], epsilon: float) -> dict[str, float]:
+    """Zeroes out any weight with abs(w) < epsilon (dust cleanup), then renormalizes the
+    remainder to sum to 1. Guards total <= 0 by returning the zeroed-but-unnormalized dict
+    unchanged -- dividing by a non-positive total would crash or, worse for a Shrt portfolio,
+    silently flip every position's sign. Should be rare in practice: the optimizer's own
+    constraint already sums raw weights to 1, and epsilon is meant to catch only dust."""
+    cleaned = {ticker: (w if abs(w) >= epsilon else 0.0) for ticker, w in weights.items()}
+    total = sum(cleaned.values())
+    if total <= 0:
+        return cleaned
+    return {ticker: w / total for ticker, w in cleaned.items()}
+
+
+def compute_portfolio_performance(
+    weights: dict[str, float], mu: pd.Series, cov: pd.DataFrame
+) -> tuple[float, float]:
+    """Recomputes (mu_p, sigma_p) directly from the given weights -- needed after
+    apply_weight_epsilon, since pypfopt's ef.portfolio_performance() reflects the raw
+    pre-epsilon weights and must not be reused once weights are cleaned."""
+    w = pd.Series(weights).reindex(mu.index)
+    mu_p = float((w * mu).sum())
+    sigma_p = float(np.sqrt(w.to_numpy() @ cov.loc[w.index, w.index].to_numpy() @ w.to_numpy()))
+    return mu_p, sigma_p

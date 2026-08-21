@@ -36,6 +36,7 @@ class PyPortFlowOptConfig:
     shortPortfolio: bool
     shortLimit: float | None
     factorModels: tuple[str, ...]
+    wtsEpsilon: float
 
 
 def market_proxy_display_name(config: PyPortFlowOptConfig) -> str | None:
@@ -94,6 +95,16 @@ def _validate_factor_models(raw: dict, errors: list[str]) -> tuple[str, ...]:
         )
 
     return tuple(canonical_names)
+
+
+def _validate_wts_epsilon(raw: dict, errors: list[str]) -> float:
+    raw_value = raw.get("wtsEpsilon")
+    if raw_value in (None, ""):
+        return 0.0
+    if not isinstance(raw_value, int | float) or isinstance(raw_value, bool) or raw_value < 0:
+        errors.append(f"'wtsEpsilon' must be a non-negative number when provided, got {raw_value!r}")
+        return 0.0
+    return float(raw_value)
 
 
 def _validate_optional_str(raw: dict, field_name: str, errors: list[str]) -> str | None:
@@ -176,6 +187,8 @@ def _validate(raw: dict) -> PyPortFlowOptConfig:
     market_proxy_ticker = _validate_optional_str(raw, "marketProxyTicker", errors)
     market_proxy_name = _validate_optional_str(raw, "marketProxyName", errors)
 
+    wts_epsilon = _validate_wts_epsilon(raw, errors)
+
     if errors:
         raise ConfigError("Invalid configuration:\n" + "\n".join(f"  - {e}" for e in errors))
 
@@ -190,4 +203,5 @@ def _validate(raw: dict) -> PyPortFlowOptConfig:
         shortPortfolio=bools["shortPortfolio"],
         shortLimit=short_limit,
         factorModels=factor_models,
+        wtsEpsilon=wts_epsilon,
     )

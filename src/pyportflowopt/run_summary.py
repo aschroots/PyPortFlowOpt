@@ -24,6 +24,7 @@ _CONFIG_FIELDS_TO_RENDER = (
     "shortPortfolio",
     "shortLimit",
     "factorModels",
+    "wtsEpsilon",
 )
 
 
@@ -143,14 +144,14 @@ def _render_output_summary(
             lines.append(
                 f"  {model} {label}: max YrExpShrp = {best.YrExpShrp:.4f} "
                 f"(window {best.perfWndwNum}, PerfStart={best.PerfStart} PerfEnd={best.PerfEnd}, "
-                f"bckTestStart={best.bckTestStart} bckTestEnd={best.bckTestEnd})"
+                f"bkTstStart={best.bkTstStart} bkTstEnd={best.bkTstEnd})"
             )
 
-        del_fore_vals = [r.YrDelForeReal for r in model_records if not math.isnan(r.YrDelForeReal)]
-        if del_fore_vals:
-            mean = statistics.mean(del_fore_vals)
-            stdev = statistics.stdev(del_fore_vals) if len(del_fore_vals) > 1 else float("nan")
-            lines.append(f"  {model}: YrDelForeReal mean = {mean:.6f}, stdev = {stdev:.6f}")
+        del_exp_vals = [r.YrDelExpReal for r in model_records if not math.isnan(r.YrDelExpReal)]
+        if del_exp_vals:
+            mean = statistics.mean(del_exp_vals)
+            stdev = statistics.stdev(del_exp_vals) if len(del_exp_vals) > 1 else float("nan")
+            lines.append(f"  {model}: YrDelExpReal mean = {mean:.6f}, stdev = {stdev:.6f}")
 
         if market_proxy_configured:
             prem_vals = [r.YrPremRealMkt for r in model_records if not math.isnan(r.YrPremRealMkt)]

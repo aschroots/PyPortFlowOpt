@@ -235,6 +235,7 @@ def test_config_valid_full_fixture_loads(fixtures_dir):
     assert config.shortPortfolio is True
     assert config.marketProxyTicker == "SPY"
     assert config.factorModels == ("CAPM", "FF3", "FFC4", "FF5", "FF5Mod", "FFC6")
+    assert config.wtsEpsilon == pytest.approx(0.0001)
 
 
 def test_config_valid_no_bcktest_fixture_loads(fixtures_dir):
@@ -242,6 +243,7 @@ def test_config_valid_no_bcktest_fixture_loads(fixtures_dir):
     assert config.doBcktest is False
     assert config.bckTestWndw is None
     assert config.marketProxyTicker is None
+    assert config.wtsEpsilon == 0.0  # omitted from this fixture -- exercises the default path
 
 
 def test_config_invalid_missing_bcktest_wndw_fixture_is_fatal(fixtures_dir):
@@ -253,3 +255,27 @@ def test_config_invalid_unknown_model_fixture_is_fatal(fixtures_dir):
     with pytest.raises(ConfigError) as exc_info:
         load_config(fixtures_dir / "config_invalid_unknown_model.yaml")
     assert "NOTAMODEL" in str(exc_info.value)
+
+
+def test_wts_epsilon_round_trips(tmp_path):
+    path = _write_config(tmp_path, overrides={"wtsEpsilon": 0.001})
+    config = load_config(path)
+    assert config.wtsEpsilon == pytest.approx(0.001)
+
+
+def test_wts_epsilon_defaults_to_zero_when_omitted(tmp_path):
+    path = _write_config(tmp_path)
+    config = load_config(path)
+    assert config.wtsEpsilon == 0.0
+
+
+def test_wts_epsilon_zero_is_valid(tmp_path):
+    path = _write_config(tmp_path, overrides={"wtsEpsilon": 0})
+    config = load_config(path)
+    assert config.wtsEpsilon == 0.0
+
+
+def test_wts_epsilon_negative_is_fatal(tmp_path):
+    path = _write_config(tmp_path, overrides={"wtsEpsilon": -0.001})
+    with pytest.raises(ConfigError):
+        load_config(path)

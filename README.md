@@ -76,6 +76,7 @@ periods-per-year must match the securities file's; a mismatch is a fatal error.
 | `shortPortfolio` | bool | Whether to also compute a short-allowed portfolio alongside the default long-only one. Must be exactly `TRUE`/`FALSE`. |
 | `shortLimit` | number in `(-1, 0]` | Maximum short position allowed on any one security. Required iff `shortPortfolio: true`. |
 | `factorModels` | list of strings | Named factor models to run in addition to the always-included `Simp` model, e.g. `[CAPM, FF3]`. `[]` runs `Simp` only. Names are case-insensitive and must come from the catalog below; duplicates are rejected. |
+| `wtsEpsilon` | non-negative number, optional | Weights from a window's optimization with absolute value below this are zeroed out and the remainder renormalized to sum to 1, before any performance figure (`YrExpR`, `YrExpVol`, `YrExpShrp`, the backtest/realized figures, etc.) or weight output is computed from them. Defaults to `0` (no filtering) when omitted. |
 
 ### Factor model catalog
 
@@ -127,46 +128,67 @@ form. The two sides of the comparison are deliberately **not** both compounded t
   per-period returns are compounded into a total return, then CAGR-annualized. This reflects
   what actually happened, not a modeling convenience.
 
-`YrDelForeReal`/`bckTestDelForeReal` are the resulting forecast-minus-realized residual;
-`YrPremRealMkt`/`bckTestPremRealMkt` are the portfolio's realized return minus the market
+`YrDelExpReal`/`bkTstDelExpReal` are the resulting forecast-minus-realized residual;
+`YrPremRealMkt`/`bkTstPremRealMkt` are the portfolio's realized return minus the market
 proxy's realized return (both `NaN` when no `marketProxyTicker` is configured).
+
+`YrExpRF` is `rf` arithmetically annualized (`rf * periodsPerYear`) — the same risk-free rate
+already implicit in `YrExpShrp`, just exposed as its own column. `YrRealRF` is the bcktest
+window's actual RF values compounded geometrically then CAGR-annualized, the same treatment
+`YrRealR` gets — so `YrRealShrp = (YrRealR - YrRealRF) / YrRealVol` compares two figures built
+the same way.
 
 ## Outputs
 
 Written into `--output-dir/runOpt_YYYYMMDD_HHMMSS/` (see the note above):
 
 - `OptResultsLngPmodPval.csv` / `OptResultsLngPvalPmod.csv` — one row per window
-  (`perfWndwNum, PerfStart, PerfEnd, bckTestStart, bckTestEnd`), then 13 value columns per
-  model (`<model>YrExpR`, `<model>bckTestExpR`, `<model>YrExpVol`, `<model>bckTestExpVol`,
-  `<model>YrExpShrp`, `<model>YrRealR`, `<model>bckTestRealR`, `<model>YrRealVol`,
-  `<model>bckTestRealVol`, `<model>YrDelForeReal`, `<model>bckTestDelForeReal`,
-  `<model>YrPremRealMkt`, `<model>bckTestPremRealMkt`). Same data in both files — `PmodPval`
-  groups all 13 columns per model together; `PvalPmod` groups all models' values of the same
-  metric together.
+  (`perfWndwNum, PerfStart, PerfEnd, bkTstStart, bkTstEnd`), then 16 value columns per
+  model (`<model>YrExpR`, `<model>bkTstExpR`, `<model>YrExpVol`, `<model>bkTstExpVol`,
+  `<model>YrExpRF`, `<model>YrExpShrp`, `<model>YrRealR`, `<model>bkTstRealR`,
+  `<model>YrRealVol`, `<model>bkTstRealVol`, `<model>YrRealRF`, `<model>YrRealShrp`,
+  `<model>YrDelExpReal`, `<model>bkTstDelExpReal`, `<model>YrPremRealMkt`,
+  `<model>bkTstPremRealMkt`). Same data in both files — `PmodPval` groups all 16 columns per
+  model together; `PvalPmod` groups all models' values of the same metric together.
 - `OptResultsShrtPmodPval.csv` / `OptResultsShrtPvalPmod.csv` — same shape, for the
   short-allowed portfolio. Only written when `shortPortfolio: true`.
+- `OptResultsOverviewLng.csv` — the same data as `OptResultsLng*.csv`, reshaped long/tidy:
+  one row per (window, model), with `Model` as a plain column instead of a pivoted column
+  prefix. Columns: `Model, perfWndw, PerfStart, PerfEnd, bkTstStart, bkTstEnd, Non-Zero Wts`,
+  then the same 16 value columns as above, unprefixed. `Non-Zero Wts` is the count of that
+  window+model's optimized weights that survived `wtsEpsilon` cleanup (see `WtsLng<Model>.csv`
+  below).
+- `OptResultsOverviewShrt.csv` — same shape, for the short-allowed portfolio, minus the
+  `Non-Zero Wts` column (not a meaningful diagnostic for a shorting-allowed portfolio, where
+  most securities are expected to receive some allocation). Only written when
+  `shortPortfolio: true`.
 - `SharpeHistory.csv` — the same id columns, then `<model>LngShrp` per model (and
   `<model>ShrtShrp` per model if `shortPortfolio: true`) — each window's annualized
   `YrExpShrp`.
 - `WtsLng<Model>.csv` (e.g. `WtsLngSimp.csv`, `WtsLngCAPM.csv`) — one file per
   expected-return model (`Simp` plus every configured `factorModels` entry), long-only
   portfolio only. Transposed from the other outputs: a `Ticker` column plus one column per
-  window (`perfWndwNum`, chronological, `Final` last). The first 3 rows are always
-  `YrExpR`/`YrExpVol`/`YrExpShrp` — that window's annualized forecast return, volatility,
-  and Sharpe ratio for the model, the same numbers as in `OptResultsLng*.csv`/
-  `SharpeHistory.csv`, just relocated here for convenience. The remaining rows are one per
-  ticker, holding that model's optimized weight in each window: blank when the ticker was
-  excluded from that window's optimization (coverage gap) or the optimization failed
-  outright, `0.0` when the ticker was included but received no allocation. Ticker rows are
-  sorted with any ticker that had a nonzero weight in at least one window first, followed by
-  tickers that were always `0.0`/excluded; original ticker order (securities CSV column
-  order) is preserved within each group.
+  window (`perfWndwNum`, chronological, `Final` last). The leading rows are always
+  `YrExpR`/`YrExpVol`/`YrExpRF`/`YrExpShrp`/`Non-Zero Wts` — that window's annualized
+  forecast return, volatility, risk-free rate, Sharpe ratio, and post-`wtsEpsilon` nonzero
+  weight count for the model, the same numbers as in `OptResultsLng*.csv`/
+  `OptResultsOverviewLng.csv`/`SharpeHistory.csv`, just relocated here for convenience. The
+  remaining rows are one per ticker, holding that model's optimized (epsilon-cleaned) weight
+  in each window: blank when the ticker was excluded from that window's optimization
+  (coverage gap) or the optimization failed outright, `0.0` when the ticker was included but
+  received no allocation (or was zeroed out by `wtsEpsilon`). Ticker rows are sorted with any
+  ticker that had a nonzero weight in at least one window first, followed by tickers that
+  were always `0.0`/excluded; original ticker order (securities CSV column order) is
+  preserved within each group.
+- `WtsShrt<Model>.csv` — same shape as `WtsLng<Model>.csv` for the short-allowed portfolio,
+  minus the `Non-Zero Wts` stat row (leading rows are just
+  `YrExpR`/`YrExpVol`/`YrExpRF`/`YrExpShrp`). Only written when `shortPortfolio: true`.
 - `run.log` — full DEBUG-level trace of the run (root logger, so `cvxpy`/`pyportfolioopt`
   solver warnings are captured too).
 - `run_summary_YYYYMMDD_HHMMSS.log` — a `PyPortFlowOpt Run Summary` title followed by
   `Configuration`, `Input Securities Summary`, `Input Factors Summary`, and (when
   `doBcktest: true`) `Output Summary` sections (per-model max Sharpe ratio and its window,
-  plus mean/stdev of `YrDelForeReal` and, if a market proxy is configured, `YrPremRealMkt`,
+  plus mean/stdev of `YrDelExpReal` and, if a market proxy is configured, `YrPremRealMkt`,
   across all backtest windows), plus any `Notes`/`Flags` raised during the run (e.g. a ticker
   excluded from a window's coverage, or an optimization that failed because no asset beat the
   risk-free rate).

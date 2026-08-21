@@ -10,6 +10,7 @@ from pyportflowopt.results import (
     STAT_ROW_LABELS,
     VALUE_FIELDS,
     OptimizationRecord,
+    build_overview_table,
     build_results_tables,
     build_sharpe_history_table,
     build_weights_tables,
@@ -27,8 +28,8 @@ def _record(
         perfWndwNum=perf_wndw_num,
         PerfStart=dt.date(2020, 1, 1),
         PerfEnd=dt.date(2020, 3, 1),
-        bckTestStart=dt.date(2020, 3, 2),
-        bckTestEnd=dt.date(2020, 4, 1),
+        bkTstStart=dt.date(2020, 3, 2),
+        bkTstEnd=dt.date(2020, 4, 1),
         Model=model,
         PortfolioType=portfolio_type,
         weights=weights,
@@ -36,23 +37,26 @@ def _record(
     )
 
 
-def test_value_fields_are_the_13_fields_in_plan_order():
+def test_value_fields_are_the_16_fields_in_plan_order():
     assert VALUE_FIELDS == (
         "YrExpR",
-        "bckTestExpR",
+        "bkTstExpR",
         "YrExpVol",
-        "bckTestExpVol",
+        "bkTstExpVol",
+        "YrExpRF",
         "YrExpShrp",
         "YrRealR",
-        "bckTestRealR",
+        "bkTstRealR",
         "YrRealVol",
-        "bckTestRealVol",
-        "YrDelForeReal",
-        "bckTestDelForeReal",
+        "bkTstRealVol",
+        "YrRealRF",
+        "YrRealShrp",
+        "YrDelExpReal",
+        "bkTstDelExpReal",
         "YrPremRealMkt",
-        "bckTestPremRealMkt",
+        "bkTstPremRealMkt",
     )
-    assert len(VALUE_FIELDS) == 13
+    assert len(VALUE_FIELDS) == 16
 
 
 def test_id_fields_include_perf_wndw_num_literally_spelled():
@@ -79,9 +83,9 @@ def test_build_results_tables_pmod_pval_groups_by_model_first():
     records = [_record(1, "Simp", "Lng"), _record(1, "CAPM", "Lng")]
     pmod_pval, _ = build_results_tables(records, "Lng", _CATALOG_ORDER)
     value_cols = [c for c in pmod_pval.columns if c not in ID_FIELDS]
-    # First 13 value columns should all be Simp's (model-outer, value-inner).
-    assert all(c.startswith("Simp") for c in value_cols[:13])
-    assert all(c.startswith("CAPM") for c in value_cols[13:26])
+    # First 16 value columns should all be Simp's (model-outer, value-inner).
+    assert all(c.startswith("Simp") for c in value_cols[:16])
+    assert all(c.startswith("CAPM") for c in value_cols[16:32])
 
 
 def test_build_results_tables_pval_pmod_groups_by_value_first():
@@ -98,8 +102,8 @@ def test_build_results_tables_model_order_follows_catalog_not_computation_order(
     pmod_pval, _ = build_results_tables(records, "Lng", _CATALOG_ORDER)
     value_cols = [c for c in pmod_pval.columns if c not in ID_FIELDS]
     assert value_cols[0].startswith("Simp")
-    assert value_cols[13].startswith("CAPM")
-    assert value_cols[26].startswith("FF3")
+    assert value_cols[16].startswith("CAPM")
+    assert value_cols[32].startswith("FF3")
 
 
 def test_build_results_tables_filters_by_portfolio_type():
@@ -233,14 +237,83 @@ def test_build_weights_tables_leading_rows_are_the_forecast_stats():
             1,
             "Simp",
             "Lng",
-            weights={"AAA": 1.0},
+            weights={"AAA": 1.0, "BBB": 0.0},
             YrExpR=0.08,
             YrExpVol=0.14,
+            YrExpRF=0.02,
             YrExpShrp=0.57,
         )
     ]
-    table = build_weights_tables(records, "Lng", ("AAA",), _CATALOG_ORDER)["Simp"]
-    assert list(table["Ticker"][:3]) == ["YrExpR", "YrExpVol", "YrExpShrp"]
+    table = build_weights_tables(records, "Lng", ("AAA", "BBB"), _CATALOG_ORDER)["Simp"]
+    assert list(table["Ticker"][:5]) == ["YrExpR", "YrExpVol", "YrExpRF", "YrExpShrp", "Non-Zero Wts"]
     assert table.loc[table["Ticker"] == "YrExpR", 1].iloc[0] == pytest.approx(0.08)
     assert table.loc[table["Ticker"] == "YrExpVol", 1].iloc[0] == pytest.approx(0.14)
+    assert table.loc[table["Ticker"] == "YrExpRF", 1].iloc[0] == pytest.approx(0.02)
     assert table.loc[table["Ticker"] == "YrExpShrp", 1].iloc[0] == pytest.approx(0.57)
+    assert table.loc[table["Ticker"] == "Non-Zero Wts", 1].iloc[0] == pytest.approx(1.0)
+
+
+def test_build_weights_tables_shrt_omits_non_zero_wts_row():
+    records = [
+        _record(1, "Simp", "Shrt", weights={"AAA": 0.7, "BBB": 0.3}, YrExpR=0.08, YrExpVol=0.14, YrExpRF=0.02)
+    ]
+    table = build_weights_tables(records, "Shrt", ("AAA", "BBB"), _CATALOG_ORDER)["Simp"]
+    assert list(table["Ticker"][:4]) == ["YrExpR", "YrExpVol", "YrExpRF", "YrExpShrp"]
+    assert "Non-Zero Wts" not in set(table["Ticker"])
+
+
+def test_build_overview_table_lng_column_order_and_non_zero_wts():
+    records = [
+        _record(1, "Simp", "Lng", weights={"AAA": 0.6, "BBB": 0.0, "CCC": 0.4}),
+        _record(1, "CAPM", "Lng", weights={"AAA": 1.0, "BBB": 0.0, "CCC": 0.0}),
+    ]
+    table = build_overview_table(records, "Lng", _CATALOG_ORDER)
+    assert list(table.columns) == [
+        "Model",
+        "perfWndw",
+        "PerfStart",
+        "PerfEnd",
+        "bkTstStart",
+        "bkTstEnd",
+        "Non-Zero Wts",
+        *VALUE_FIELDS,
+    ]
+    assert len(table) == 2
+    simp_row = table[table["Model"] == "Simp"].iloc[0]
+    assert simp_row["Non-Zero Wts"] == pytest.approx(2.0)
+    capm_row = table[table["Model"] == "CAPM"].iloc[0]
+    assert capm_row["Non-Zero Wts"] == pytest.approx(1.0)
+    assert simp_row["perfWndw"] == 1
+
+
+def test_build_overview_table_shrt_omits_non_zero_wts_column():
+    records = [_record(1, "Simp", "Shrt", weights={"AAA": 0.7, "BBB": 0.3})]
+    table = build_overview_table(records, "Shrt", _CATALOG_ORDER)
+    assert list(table.columns) == [
+        "Model",
+        "perfWndw",
+        "PerfStart",
+        "PerfEnd",
+        "bkTstStart",
+        "bkTstEnd",
+        *VALUE_FIELDS,
+    ]
+    assert "Non-Zero Wts" not in table.columns
+
+
+def test_build_overview_table_failed_optimization_non_zero_wts_is_nan():
+    records = [_record(1, "Simp", "Lng", weights=None)]
+    table = build_overview_table(records, "Lng", _CATALOG_ORDER)
+    assert pd.isna(table.iloc[0]["Non-Zero Wts"])
+
+
+def test_build_overview_table_filters_by_portfolio_type_and_preserves_row_order():
+    records = [
+        _record(1, "Simp", "Lng", weights={"AAA": 1.0}),
+        _record(1, "CAPM", "Lng", weights={"AAA": 1.0}),
+        _record(1, "Simp", "Shrt", weights={"AAA": 1.0}),
+        _record(2, "Simp", "Lng", weights={"AAA": 1.0}),
+    ]
+    table = build_overview_table(records, "Lng", _CATALOG_ORDER)
+    pairs = list(zip(table["perfWndw"], table["Model"], strict=True))
+    assert pairs == [(1, "Simp"), (1, "CAPM"), (2, "Simp")]

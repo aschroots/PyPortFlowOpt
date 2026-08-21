@@ -4,6 +4,7 @@ import math
 
 import pandas as pd
 import pytest
+import yaml
 
 from pyportflowopt.config import load_config
 from pyportflowopt.pipeline import run
@@ -67,6 +68,8 @@ def test_golden_path_writes_all_expected_output_files(fixtures_dir, tmp_path):
         "OptResultsLngPvalPmod.csv",
         "OptResultsShrtPmodPval.csv",
         "OptResultsShrtPvalPmod.csv",
+        "OptResultsOverviewLng.csv",
+        "OptResultsOverviewShrt.csv",
         "SharpeHistory.csv",
         "WtsLngSimp.csv",
         "WtsLngCAPM.csv",
@@ -75,43 +78,73 @@ def test_golden_path_writes_all_expected_output_files(fixtures_dir, tmp_path):
         "WtsLngFF5.csv",
         "WtsLngFF5Mod.csv",
         "WtsLngFFC6.csv",
+        "WtsShrtSimp.csv",
+        "WtsShrtCAPM.csv",
+        "WtsShrtFF3.csv",
+        "WtsShrtFFC4.csv",
+        "WtsShrtFF5.csv",
+        "WtsShrtFF5Mod.csv",
+        "WtsShrtFFC6.csv",
         "run_summary_20240101_120000.log",
     ]
     for filename in expected_files:
         assert (output_dir / filename).exists(), filename
 
-    assert not list(output_dir.glob("WtsShrt*.csv"))  # long-only scope for this feature
-
     assert result.run_summary_path == output_dir / "run_summary_20240101_120000.log"
     assert set(result.weights_lng_paths) == {"Simp", "CAPM", "FF3", "FFC4", "FF5", "FF5Mod", "FFC6"}
     assert result.weights_lng_paths["Simp"] == output_dir / "WtsLngSimp.csv"
+    assert set(result.weights_shrt_paths) == {"Simp", "CAPM", "FF3", "FFC4", "FF5", "FF5Mod", "FFC6"}
+    assert result.weights_shrt_paths["Simp"] == output_dir / "WtsShrtSimp.csv"
 
     sharpe_history = pd.read_csv(output_dir / "SharpeHistory.csv")
     assert list(sharpe_history.columns[:5]) == [
         "perfWndwNum",
         "PerfStart",
         "PerfEnd",
-        "bckTestStart",
-        "bckTestEnd",
+        "bkTstStart",
+        "bkTstEnd",
     ]
     assert len(sharpe_history) == 5  # 4 backtest windows + Final
 
     lng_pmod_pval = pd.read_csv(output_dir / "OptResultsLngPmodPval.csv")
     assert "SimpYrExpR" in lng_pmod_pval.columns
     assert "CAPMYrExpR" in lng_pmod_pval.columns
+    assert "SimpYrExpRF" in lng_pmod_pval.columns
+    assert "SimpYrRealRF" in lng_pmod_pval.columns
+    assert "SimpYrRealShrp" in lng_pmod_pval.columns
+
+    overview_lng = pd.read_csv(output_dir / "OptResultsOverviewLng.csv")
+    assert list(overview_lng.columns[:7]) == [
+        "Model",
+        "perfWndw",
+        "PerfStart",
+        "PerfEnd",
+        "bkTstStart",
+        "bkTstEnd",
+        "Non-Zero Wts",
+    ]
+    assert len(overview_lng) == 5 * 7  # 5 windows * 7 models (Simp + 6 catalog models)
+
+    overview_shrt = pd.read_csv(output_dir / "OptResultsOverviewShrt.csv")
+    assert "Non-Zero Wts" not in overview_shrt.columns
 
     weights_simp = pd.read_csv(output_dir / "WtsLngSimp.csv")
     assert weights_simp.columns[0] == "Ticker"
-    assert list(weights_simp["Ticker"][:3]) == ["YrExpR", "YrExpVol", "YrExpShrp"]
-    assert set(weights_simp["Ticker"][3:]) == {"AAA", "BBB", "CCC", "DDD"}
-    assert len(weights_simp) == 3 + 4  # 3 stat rows + 4 tickers
+    assert list(weights_simp["Ticker"][:5]) == ["YrExpR", "YrExpVol", "YrExpRF", "YrExpShrp", "Non-Zero Wts"]
+    assert set(weights_simp["Ticker"][5:]) == {"AAA", "BBB", "CCC", "DDD"}
+    assert len(weights_simp) == 5 + 4  # 5 stat rows + 4 tickers
     assert len(weights_simp.columns) == 1 + 5  # "Ticker" + 4 backtest windows + Final
-    ticker_weights = weights_simp[~weights_simp["Ticker"].isin(["YrExpR", "YrExpVol", "YrExpShrp"])]
+    stat_labels = {"YrExpR", "YrExpVol", "YrExpRF", "YrExpShrp", "Non-Zero Wts"}
+    ticker_weights = weights_simp[~weights_simp["Ticker"].isin(stat_labels)]
     window_cols = [c for c in weights_simp.columns if c != "Ticker"]
     for col in window_cols:
         values = ticker_weights[col]
         if values.notna().any():  # skip windows where this model's optimization failed
             assert values.sum(skipna=True) == pytest.approx(1.0)
+
+    weights_shrt_simp = pd.read_csv(output_dir / "WtsShrtSimp.csv")
+    assert list(weights_shrt_simp["Ticker"][:4]) == ["YrExpR", "YrExpVol", "YrExpRF", "YrExpShrp"]
+    assert "Non-Zero Wts" not in set(weights_shrt_simp["Ticker"])
 
 
 def test_golden_path_final_row_has_nan_realized_fields_but_populated_forecast(fixtures_dir, tmp_path):
@@ -131,11 +164,14 @@ def test_golden_path_final_row_has_nan_realized_fields_but_populated_forecast(fi
     assert final_records
     for r in final_records:
         assert math.isnan(r.YrRealR)
-        assert math.isnan(r.bckTestRealR)
-        assert math.isnan(r.YrDelForeReal)
-        assert r.bckTestStart is None
-        assert r.bckTestEnd is None
+        assert math.isnan(r.bkTstRealR)
+        assert math.isnan(r.YrRealRF)
+        assert math.isnan(r.YrRealShrp)
+        assert math.isnan(r.YrDelExpReal)
+        assert r.bkTstStart is None
+        assert r.bkTstEnd is None
         if not math.isnan(r.YrExpR):  # only successful optimizations have a populated forecast
+            assert not math.isnan(r.YrExpRF)
             assert not math.isnan(r.YrExpShrp)
 
 
@@ -158,8 +194,10 @@ def test_golden_path_backtest_windows_have_populated_realized_fields_on_success(
     assert non_final_successful
     for r in non_final_successful:
         assert not math.isnan(r.YrRealR)
-        assert not math.isnan(r.bckTestRealR)
-        assert not math.isnan(r.YrDelForeReal)
+        assert not math.isnan(r.bkTstRealR)
+        assert not math.isnan(r.YrRealRF)
+        assert not math.isnan(r.YrRealShrp)
+        assert not math.isnan(r.YrDelExpReal)
 
 
 def test_golden_path_no_bcktest_run_has_all_real_columns_nan(fixtures_dir, tmp_path):
@@ -180,15 +218,19 @@ def test_golden_path_no_bcktest_run_has_all_real_columns_nan(fixtures_dir, tmp_p
     assert result.window_plan.n_perf_windows is not None
     for r in result.records:
         assert math.isnan(r.YrRealR)
-        assert math.isnan(r.bckTestRealR)
+        assert math.isnan(r.bkTstRealR)
         assert math.isnan(r.YrRealVol)
-        assert math.isnan(r.bckTestRealVol)
-        assert math.isnan(r.YrDelForeReal)
-        assert math.isnan(r.bckTestDelForeReal)
+        assert math.isnan(r.bkTstRealVol)
+        assert math.isnan(r.YrRealRF)
+        assert math.isnan(r.YrRealShrp)
+        assert math.isnan(r.YrDelExpReal)
+        assert math.isnan(r.bkTstDelExpReal)
         assert math.isnan(r.YrPremRealMkt)
-        assert math.isnan(r.bckTestPremRealMkt)
-        assert math.isnan(r.bckTestExpR)  # B is unavailable for the whole run
-        assert math.isnan(r.bckTestExpVol)
+        assert math.isnan(r.bkTstPremRealMkt)
+        assert math.isnan(r.bkTstExpR)  # B is unavailable for the whole run
+        assert math.isnan(r.bkTstExpVol)
+        if not math.isnan(r.YrExpR):  # only successful optimizations have a populated forecast
+            assert not math.isnan(r.YrExpRF)
 
     assert "nPerfWindows" in result.summary_text
     assert "nBacktests" not in result.summary_text
@@ -197,6 +239,9 @@ def test_golden_path_no_bcktest_run_has_all_real_columns_nan(fixtures_dir, tmp_p
     lng_pmod_pval = pd.read_csv(output_dir / "OptResultsLngPmodPval.csv")
     assert lng_pmod_pval["SimpYrRealR"].isna().all()
     assert not (output_dir / "OptResultsShrtPmodPval.csv").exists()  # shortPortfolio: false
+    assert not (output_dir / "OptResultsOverviewShrt.csv").exists()  # shortPortfolio: false
+    assert (output_dir / "OptResultsOverviewLng.csv").exists()
+    assert not list(output_dir.glob("WtsShrt*.csv"))  # shortPortfolio: false
 
 
 def test_frequency_mismatch_between_securities_and_factors_is_fatal(fixtures_dir, tmp_path, write_factor_csv):
@@ -219,3 +264,39 @@ def test_frequency_mismatch_between_securities_and_factors_is_fatal(fixtures_dir
             factors_path=bad_factor_path,
             output_dir=tmp_path / "out",
         )
+
+
+def test_wts_epsilon_zeroes_dust_and_renormalizes_remaining_weights(fixtures_dir, tmp_path):
+    base_config = yaml.safe_load((fixtures_dir / "config_valid_full.yaml").read_text(encoding="utf-8"))
+    # With 4 tickers and epsilon=0.5, at most 2 raw weights can each be >= 0.5 (they'd
+    # otherwise sum past 1) -- a deterministic invariant to check without depending on the
+    # optimizer's actual output for this fixture's data.
+    base_config["wtsEpsilon"] = 0.5
+    config_path = tmp_path / "config_wts_epsilon.yaml"
+    config_path.write_text(yaml.safe_dump(base_config), encoding="utf-8")
+    config = load_config(config_path)
+    assert config.wtsEpsilon == pytest.approx(0.5)
+
+    output_dir = tmp_path / "out"
+    run(
+        config=config,
+        config_path=config_path,
+        securities_path=fixtures_dir / "securities_prices.csv",
+        factors_path=fixtures_dir / "factors.csv",
+        output_dir=output_dir,
+        run_timestamp=_RUN_TIMESTAMP,
+    )
+
+    overview_lng = pd.read_csv(output_dir / "OptResultsOverviewLng.csv")
+    populated = overview_lng[overview_lng["Non-Zero Wts"].notna()]
+    assert not populated.empty
+    assert (populated["Non-Zero Wts"] <= 2).all()
+
+    weights_simp = pd.read_csv(output_dir / "WtsLngSimp.csv")
+    stat_labels = {"YrExpR", "YrExpVol", "YrExpRF", "YrExpShrp", "Non-Zero Wts"}
+    ticker_weights = weights_simp[~weights_simp["Ticker"].isin(stat_labels)]
+    window_cols = [c for c in weights_simp.columns if c != "Ticker"]
+    for col in window_cols:
+        values = ticker_weights[col]
+        if values.notna().any():  # skip windows where this model's optimization failed
+            assert values.sum(skipna=True) == pytest.approx(1.0)

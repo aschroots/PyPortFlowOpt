@@ -8,8 +8,10 @@ from pyportflowopt.optimization import (
     LONG_PORTFOLIO_TYPE,
     SHORT_PORTFOLIO_TYPE,
     SIMP_MODEL_NAME,
+    apply_weight_epsilon,
     compute_factor_model_mu,
     compute_long_run_cutoff,
+    compute_portfolio_performance,
     compute_simp_mu,
     optimize_portfolio,
 )
@@ -160,3 +162,43 @@ def test_portfolio_type_constants_and_bounds_shape():
     assert LONG_PORTFOLIO_TYPE == "Lng"
     assert SHORT_PORTFOLIO_TYPE == "Shrt"
     assert SIMP_MODEL_NAME == "Simp"
+
+
+def test_apply_weight_epsilon_zeroes_dust_and_renormalizes_remainder():
+    weights = {"AAA": 0.5, "BBB": 0.499, "CCC": 0.001}
+    cleaned = apply_weight_epsilon(weights, epsilon=0.01)
+    assert cleaned["CCC"] == 0.0
+    assert sum(cleaned.values()) == pytest.approx(1.0)
+    assert cleaned["AAA"] == pytest.approx(0.5 / 0.999)
+    assert cleaned["BBB"] == pytest.approx(0.499 / 0.999)
+
+
+def test_apply_weight_epsilon_zero_is_a_no_op_modulo_floating_point():
+    weights = {"AAA": 0.6, "BBB": 0.3, "CCC": 0.1}
+    cleaned = apply_weight_epsilon(weights, epsilon=0.0)
+    assert cleaned == pytest.approx(weights)
+
+
+def test_apply_weight_epsilon_negative_weights_use_absolute_value():
+    weights = {"AAA": 1.2, "BBB": -0.15, "CCC": -0.05}
+    cleaned = apply_weight_epsilon(weights, epsilon=0.1)
+    assert cleaned["CCC"] == 0.0
+    assert cleaned["BBB"] != 0.0
+    assert sum(cleaned.values()) == pytest.approx(1.0)
+
+
+def test_apply_weight_epsilon_degenerate_total_returns_zeroed_unnormalized():
+    # Every weight below epsilon -- renormalizing (dividing by 0) would crash.
+    weights = {"AAA": 0.05, "BBB": -0.05}
+    cleaned = apply_weight_epsilon(weights, epsilon=0.1)
+    assert cleaned == {"AAA": 0.0, "BBB": 0.0}
+
+
+def test_compute_portfolio_performance_hand_computed():
+    weights = {"AAA": 0.6, "BBB": 0.4}
+    mu = pd.Series({"AAA": 0.05, "BBB": 0.03})
+    cov = pd.DataFrame([[0.04, 0.01], [0.01, 0.02]], index=["AAA", "BBB"], columns=["AAA", "BBB"])
+    mu_p, sigma_p = compute_portfolio_performance(weights, mu, cov)
+    assert mu_p == pytest.approx(0.6 * 0.05 + 0.4 * 0.03)
+    expected_var = 0.6**2 * 0.04 + 0.4**2 * 0.02 + 2 * 0.6 * 0.4 * 0.01
+    assert sigma_p == pytest.approx(expected_var**0.5)

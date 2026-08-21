@@ -25,6 +25,7 @@ def _config(**overrides) -> PyPortFlowOptConfig:
         shortPortfolio=False,
         shortLimit=None,
         factorModels=("CAPM",),
+        wtsEpsilon=0.0,
     )
     base.update(overrides)
     return PyPortFlowOptConfig(**base)
@@ -37,8 +38,8 @@ def _record(perf_wndw_num, model, portfolio_type="Lng", **overrides) -> Optimiza
         perfWndwNum=perf_wndw_num,
         PerfStart=dt.date(2020, 1, 1),
         PerfEnd=dt.date(2020, 3, 1),
-        bckTestStart=dt.date(2020, 3, 2),
-        bckTestEnd=dt.date(2020, 4, 1),
+        bkTstStart=dt.date(2020, 3, 2),
+        bkTstEnd=dt.date(2020, 4, 1),
         Model=model,
         PortfolioType=portfolio_type,
         **values,
@@ -107,7 +108,7 @@ def test_do_bcktest_true_renders_n_backtests_and_output_summary():
     )
     rendered = _render(
         _config(),
-        [_record(1, "Simp", YrExpShrp=1.5, YrDelForeReal=0.02)],
+        [_record(1, "Simp", YrExpShrp=1.5, YrDelExpReal=0.02)],
         window_plan=window_plan,
     )
     assert "nBacktests = 4" in rendered
@@ -131,9 +132,9 @@ def test_output_summary_omits_market_proxy_stats_when_unconfigured():
     config = _config(marketProxyTicker=None, marketProxyName=None)
     rendered = _render(
         config,
-        [_record(1, "Simp", YrExpShrp=1.5, YrDelForeReal=0.02, YrPremRealMkt=float("nan"))],
+        [_record(1, "Simp", YrExpShrp=1.5, YrDelExpReal=0.02, YrPremRealMkt=float("nan"))],
     )
-    assert "YrDelForeReal mean" in rendered
+    assert "YrDelExpReal mean" in rendered
     assert "YrPremRealMkt" not in rendered
 
 

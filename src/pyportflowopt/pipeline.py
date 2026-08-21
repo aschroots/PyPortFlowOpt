@@ -11,7 +11,9 @@ from .annualization import (
     NAN_REALIZED_PERFORMANCE,
     compute_forecast_annualization,
     compute_realized_performance,
-    residual_del_fore_real,
+    compute_realized_rf,
+    compute_realized_sharpe,
+    residual_del_exp_real,
     residual_prem_real_mkt,
 )
 from .config import FACTOR_MODEL_CATALOG, PyPortFlowOptConfig
@@ -23,14 +25,17 @@ from .optimization import (
     LONG_PORTFOLIO_TYPE,
     SHORT_PORTFOLIO_TYPE,
     SIMP_MODEL_NAME,
+    apply_weight_epsilon,
     compute_factor_model_mu,
     compute_long_run_cutoff,
+    compute_portfolio_performance,
     compute_simp_mu,
     optimize_portfolio,
 )
 from .output_writing import write_output_csv
 from .results import (
     OptimizationRecord,
+    build_overview_table,
     build_results_tables,
     build_sharpe_history_table,
     build_weights_tables,
@@ -61,7 +66,10 @@ class RunResult:
     opt_results_lng_pval_pmod_path: Path
     opt_results_shrt_pmod_pval_path: Path | None
     opt_results_shrt_pval_pmod_path: Path | None
+    opt_results_overview_lng_path: Path
+    opt_results_overview_shrt_path: Path | None
     weights_lng_paths: dict[str, Path]
+    weights_shrt_paths: dict[str, Path]
 
 
 def _nan_record(
@@ -72,23 +80,26 @@ def _nan_record(
         perfWndwNum=window.perf_wndw_num,
         PerfStart=perf_start,
         PerfEnd=perf_end,
-        bckTestStart=bcktest_start,
-        bckTestEnd=bcktest_end,
+        bkTstStart=bcktest_start,
+        bkTstEnd=bcktest_end,
         Model=model,
         PortfolioType=portfolio_type,
         YrExpR=nan,
-        bckTestExpR=nan,
+        bkTstExpR=nan,
         YrExpVol=nan,
-        bckTestExpVol=nan,
+        bkTstExpVol=nan,
+        YrExpRF=nan,
         YrExpShrp=nan,
         YrRealR=nan,
-        bckTestRealR=nan,
+        bkTstRealR=nan,
         YrRealVol=nan,
-        bckTestRealVol=nan,
-        YrDelForeReal=nan,
-        bckTestDelForeReal=nan,
+        bkTstRealVol=nan,
+        YrRealRF=nan,
+        YrRealShrp=nan,
+        YrDelExpReal=nan,
+        bkTstDelExpReal=nan,
         YrPremRealMkt=nan,
-        bckTestPremRealMkt=nan,
+        bkTstPremRealMkt=nan,
     )
 
 
@@ -265,8 +276,32 @@ def run(
                     )
                     continue
 
+                adjusted_weights = apply_weight_epsilon(outcome.weights, config.wtsEpsilon)
+                if not any(w != 0.0 for w in adjusted_weights.values()):
+                    message = (
+                        f"Window {window.perf_wndw_num} [{model_name}/{portfolio_type}]: "
+                        f"wtsEpsilon={config.wtsEpsilon} zeroed every weight; "
+                        f"treating as a failed optimization."
+                    )
+                    summary.flag(message)
+                    logger.warning(message)
+                    records.append(
+                        _nan_record(
+                            window,
+                            window_dates.perf_start.date(),
+                            window_dates.perf_end.date(),
+                            window_dates.bcktest_start.date() if window_dates.bcktest_start else None,
+                            window_dates.bcktest_end.date() if window_dates.bcktest_end else None,
+                            model_name,
+                            portfolio_type,
+                        )
+                    )
+                    continue
+
+                mu_p, sigma_p = compute_portfolio_performance(adjusted_weights, mu, cov)
+
                 forecast = compute_forecast_annualization(
-                    outcome.mu_p, outcome.sigma_p, rf, periods_per_year, config.bckTestWndw
+                    mu_p, sigma_p, rf, periods_per_year, config.bckTestWndw
                 )
 
                 if window.has_bcktest:
@@ -274,21 +309,26 @@ def run(
                         securities_data.dates, window.bcktest_start_row, window.bcktest_end_row
                     )
                     portfolio_bck_returns = _portfolio_bcktest_returns(
-                        securities_data.returns, bck_dates, outcome.weights
+                        securities_data.returns, bck_dates, adjusted_weights
                     )
                     realized = compute_realized_performance(
                         portfolio_bck_returns.to_numpy(), periods_per_year
                     )
+                    aligned_factors_bck = align_factor_window(factor_data.values, bck_dates, periods_per_year)
+                    yr_real_rf = compute_realized_rf(aligned_factors_bck["RF"].to_numpy(), periods_per_year)
+                    yr_real_shrp = compute_realized_sharpe(realized.YrRealR, yr_real_rf, realized.YrRealVol)
                 else:
                     realized = NAN_REALIZED_PERFORMANCE
+                    yr_real_rf = float("nan")
+                    yr_real_shrp = float("nan")
 
-                yr_del_fore_real = residual_del_fore_real(forecast.YrExpR, realized.YrRealR)
-                bcktest_del_fore_real = residual_del_fore_real(forecast.bckTestExpR, realized.bckTestRealR)
+                yr_del_exp_real = residual_del_exp_real(forecast.YrExpR, realized.YrRealR)
+                bcktest_del_exp_real = residual_del_exp_real(forecast.bkTstExpR, realized.bkTstRealR)
 
                 if window.has_bcktest and market_realized is not None:
                     yr_prem_real_mkt = residual_prem_real_mkt(realized.YrRealR, market_realized.YrRealR)
                     bcktest_prem_real_mkt = residual_prem_real_mkt(
-                        realized.bckTestRealR, market_realized.bckTestRealR
+                        realized.bkTstRealR, market_realized.bkTstRealR
                     )
                 else:
                     yr_prem_real_mkt = float("nan")
@@ -299,26 +339,29 @@ def run(
                         perfWndwNum=window.perf_wndw_num,
                         PerfStart=window_dates.perf_start.date(),
                         PerfEnd=window_dates.perf_end.date(),
-                        bckTestStart=(
+                        bkTstStart=(
                             window_dates.bcktest_start.date() if window_dates.bcktest_start else None
                         ),
-                        bckTestEnd=window_dates.bcktest_end.date() if window_dates.bcktest_end else None,
+                        bkTstEnd=window_dates.bcktest_end.date() if window_dates.bcktest_end else None,
                         Model=model_name,
                         PortfolioType=portfolio_type,
                         YrExpR=forecast.YrExpR,
-                        bckTestExpR=forecast.bckTestExpR,
+                        bkTstExpR=forecast.bkTstExpR,
                         YrExpVol=forecast.YrExpVol,
-                        bckTestExpVol=forecast.bckTestExpVol,
+                        bkTstExpVol=forecast.bkTstExpVol,
+                        YrExpRF=forecast.YrExpRF,
                         YrExpShrp=forecast.YrExpShrp,
                         YrRealR=realized.YrRealR,
-                        bckTestRealR=realized.bckTestRealR,
+                        bkTstRealR=realized.bkTstRealR,
                         YrRealVol=realized.YrRealVol,
-                        bckTestRealVol=realized.bckTestRealVol,
-                        YrDelForeReal=yr_del_fore_real,
-                        bckTestDelForeReal=bcktest_del_fore_real,
+                        bkTstRealVol=realized.bkTstRealVol,
+                        YrRealRF=yr_real_rf,
+                        YrRealShrp=yr_real_shrp,
+                        YrDelExpReal=yr_del_exp_real,
+                        bkTstDelExpReal=bcktest_del_exp_real,
                         YrPremRealMkt=yr_prem_real_mkt,
-                        bckTestPremRealMkt=bcktest_prem_real_mkt,
-                        weights=outcome.weights,
+                        bkTstPremRealMkt=bcktest_prem_real_mkt,
+                        weights=adjusted_weights,
                     )
                 )
 
@@ -341,6 +384,16 @@ def run(
         write_output_csv(shrt_pmod_pval_path, shrt_pmod_pval)
         write_output_csv(shrt_pval_pmod_path, shrt_pval_pmod)
 
+    overview_lng = build_overview_table(records, LONG_PORTFOLIO_TYPE, catalog_order)
+    overview_lng_path = output_dir / "OptResultsOverviewLng.csv"
+    write_output_csv(overview_lng_path, overview_lng)
+
+    overview_shrt_path: Path | None = None
+    if config.shortPortfolio:
+        overview_shrt = build_overview_table(records, SHORT_PORTFOLIO_TYPE, catalog_order)
+        overview_shrt_path = output_dir / "OptResultsOverviewShrt.csv"
+        write_output_csv(overview_shrt_path, overview_shrt)
+
     lng_weights_tables = build_weights_tables(
         records, LONG_PORTFOLIO_TYPE, tuple(securities_data.returns.columns), catalog_order
     )
@@ -349,6 +402,16 @@ def run(
         weights_path = output_dir / f"WtsLng{model_name}.csv"
         write_output_csv(weights_path, weights_df)
         weights_lng_paths[model_name] = weights_path
+
+    weights_shrt_paths: dict[str, Path] = {}
+    if config.shortPortfolio:
+        shrt_weights_tables = build_weights_tables(
+            records, SHORT_PORTFOLIO_TYPE, tuple(securities_data.returns.columns), catalog_order
+        )
+        for model_name, weights_df in shrt_weights_tables.items():
+            weights_path = output_dir / f"WtsShrt{model_name}.csv"
+            write_output_csv(weights_path, weights_df)
+            weights_shrt_paths[model_name] = weights_path
 
     sharpe_history = build_sharpe_history_table(records, catalog_order)
     sharpe_history_path = output_dir / "SharpeHistory.csv"
@@ -384,5 +447,8 @@ def run(
         opt_results_lng_pval_pmod_path=lng_pval_pmod_path,
         opt_results_shrt_pmod_pval_path=shrt_pmod_pval_path,
         opt_results_shrt_pval_pmod_path=shrt_pval_pmod_path,
+        opt_results_overview_lng_path=overview_lng_path,
+        opt_results_overview_shrt_path=overview_shrt_path,
         weights_lng_paths=weights_lng_paths,
+        weights_shrt_paths=weights_shrt_paths,
     )
