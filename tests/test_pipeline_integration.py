@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pandas as pd
 import pytest
 import yaml
 
 from pyportflowopt.config import load_config
-from pyportflowopt.pipeline import run
+from pyportflowopt.pipeline import _portfolio_bcktest_returns, run
 
 _RUN_TIMESTAMP = pd.Timestamp("2024-01-01 12:00:00").to_pydatetime()
 
@@ -300,3 +301,36 @@ def test_wts_epsilon_zeroes_dust_and_renormalizes_remaining_weights(fixtures_dir
         values = ticker_weights[col]
         if values.notna().any():  # skip windows where this model's optimization failed
             assert values.sum(skipna=True) == pytest.approx(1.0)
+
+
+def test_portfolio_bcktest_returns_is_buy_and_hold_not_rebalanced():
+    # A and B diverge every period, so a buy-and-hold portfolio's effective weights drift
+    # away from the initial 50/50 target -- a constant-mix/rebalanced calculation would not
+    # show that drift and would land on a different total.
+    bck_dates = pd.date_range("2020-01-01", periods=3, freq="D")
+    returns = pd.DataFrame(
+        {"A": [0.10, 0.10, 0.10], "B": [-0.10, -0.10, -0.10], "C": [0.05, 0.05, 0.05]},
+        index=bck_dates,
+    )
+    weights = {"A": 0.5, "B": 0.5}
+
+    result = _portfolio_bcktest_returns(returns, bck_dates, weights)
+
+    assert list(result.index) == list(bck_dates)
+
+    # Closed-form buy-and-hold total: each security compounds on its own, weights combine
+    # the compounded values once, at the end.
+    expected_total = 0.5 * (1.10**3) + 0.5 * (0.90**3) - 1.0
+    compounded_total = float(np.prod(1.0 + result.to_numpy()) - 1.0)
+    assert compounded_total == pytest.approx(expected_total)
+
+    # The naive rebalanced-every-period calculation (re-applying the initial weights to each
+    # period's raw returns) gives a different, wrong total here -- this is the regression
+    # guard for the original bug.
+    naive_period_returns = returns[["A", "B"]].to_numpy() @ np.array([0.5, 0.5])
+    naive_total = float(np.prod(1.0 + naive_period_returns) - 1.0)
+    assert naive_total == pytest.approx(0.0)
+    assert compounded_total != pytest.approx(naive_total)
+
+    # First period: no drift has happened yet, so buy-and-hold and rebalanced agree.
+    assert result.iloc[0] == pytest.approx(naive_period_returns[0])

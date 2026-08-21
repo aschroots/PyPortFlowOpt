@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .annualization import (
@@ -106,9 +107,19 @@ def _nan_record(
 def _portfolio_bcktest_returns(
     returns: pd.DataFrame, bck_dates: pd.DatetimeIndex, weights: dict[str, float]
 ) -> pd.Series:
+    """Buy-and-hold, not rebalanced: weights are the allocation bought once at the window's
+    start (the only optimization decision made for this window) and held through the whole
+    backtest window. Each security compounds on its own (cumprod), weights combine those
+    compounded values into a portfolio value path once, and per-period returns are derived
+    from that path -- so effective weights drift with relative performance, matching a real
+    unrebalanced position rather than implying trades this pipeline never models or costs."""
     weights_series = pd.Series(weights)
     bck_returns = returns.loc[bck_dates, weights_series.index]
-    return pd.Series(bck_returns.to_numpy() @ weights_series.to_numpy(), index=bck_returns.index)
+    growth = (1.0 + bck_returns).cumprod()
+    portfolio_value = growth.to_numpy() @ weights_series.to_numpy()
+    value_path = np.concatenate([[1.0], portfolio_value])
+    period_returns = value_path[1:] / value_path[:-1] - 1.0
+    return pd.Series(period_returns, index=bck_returns.index)
 
 
 def run(

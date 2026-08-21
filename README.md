@@ -105,7 +105,21 @@ date). See `factor_models.py` for the exact mechanics.
 matrix, then find the max-Sharpe/tangent portfolio for the risk-free rate in effect at that
 point in history). When `doBcktest: true`, the following `bckTestWndw` rows are used to
 measure how that portfolio actually performed, and the window then shifts forward by
-`perfWndwShft` rows and repeats. If the history doesn't divide evenly into shift-sized steps,
+`perfWndwShft` rows and repeats.
+
+The backtest measures a **buy-and-hold** portfolio, not a rebalanced one: the optimized
+weights are the allocation bought once at the start of the backtest window (the only
+optimization decision made for that window — there's no re-optimization or trading modeled
+at any point during `bckTestWndw`, and each `WtsLng<Model>.csv`/`WtsShrt<Model>.csv` reports
+exactly one row of weights per window, not one per backtest period) and then held
+un-rebalanced through to the end. Each security's return compounds on its own; the
+portfolio's realized value path is the weighted combination of those individually-compounded
+values, so a security's *effective* weight drifts away from its initial target as it out- or
+under-performs the rest of the portfolio over the window — the same as a real position no one
+touched. `bkTstRealR`/`YrRealR` and `bkTstRealVol`/`YrRealVol` (see Annualization below) are
+all derived from that buy-and-hold value path.
+
+If the history doesn't divide evenly into shift-sized steps,
 one final backtest window is anchored to the most recent data instead of following
 `perfWndwShft` — noted in the run summary. When `doBcktest: false`, the same shifting
 `perfWndw` windows are still produced (for their `Exp*` forecast columns), just without any
