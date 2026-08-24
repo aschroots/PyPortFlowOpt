@@ -168,7 +168,7 @@ Written into `--output-dir/runOpt_YYYYMMDD_HHMMSS/` (see the note above):
   short-allowed portfolio. Only written when `shortPortfolio: true`.
 - `OptResultsOverviewLng.csv` — the same data as `OptResultsLng*.csv`, reshaped long/tidy:
   one row per (window, model), with `Model` as a plain column instead of a pivoted column
-  prefix. Columns: `Model, perfWndw, PerfStart, PerfEnd, bkTstStart, bkTstEnd, Non-Zero Wts`,
+  prefix. Columns: `Model, perfWndwNum, PerfStart, PerfEnd, bkTstStart, bkTstEnd, Non-Zero Wts`,
   then the same 16 value columns as above, unprefixed. `Non-Zero Wts` is the count of that
   window+model's optimized weights that survived `wtsEpsilon` cleanup (see `WtsLng<Model>.csv`
   below).

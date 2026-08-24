@@ -117,7 +117,7 @@ def test_golden_path_writes_all_expected_output_files(fixtures_dir, tmp_path):
     overview_lng = pd.read_csv(output_dir / "OptResultsOverviewLng.csv")
     assert list(overview_lng.columns[:7]) == [
         "Model",
-        "perfWndw",
+        "perfWndwNum",
         "PerfStart",
         "PerfEnd",
         "bkTstStart",

@@ -114,11 +114,11 @@ def build_overview_table(
     records: Sequence[OptimizationRecord], portfolio_type: str, catalog_order: Sequence[str]
 ) -> pd.DataFrame:
     """One row per (window, model) for the given portfolio type -- Model as a plain column,
-    not pivoted into the column name like build_results_tables. Column order: Model, perfWndw
-    (perfWndwNum under this table's own name), PerfStart, PerfEnd, bkTstStart, bkTstEnd,
-    Non-Zero Wts (Lng only -- omitted entirely for Shrt, where it isn't a meaningful
-    diagnostic), then the 16 VALUE_FIELDS unprefixed. Row order preserves `records`' own
-    generation order (window-major, then catalog-model-order within each window)."""
+    not pivoted into the column name like build_results_tables. Column order: Model,
+    perfWndwNum, PerfStart, PerfEnd, bkTstStart, bkTstEnd, Non-Zero Wts (Lng only -- omitted
+    entirely for Shrt, where it isn't a meaningful diagnostic), then the 16 VALUE_FIELDS
+    unprefixed. Row order preserves `records`' own generation order (window-major, then
+    catalog-model-order within each window)."""
     filtered = [r for r in records if r.PortfolioType == portfolio_type]
     include_nonzero_wts = portfolio_type == "Lng"
 
@@ -126,7 +126,7 @@ def build_overview_table(
     for r in filtered:
         row: dict[str, object] = {
             "Model": r.Model,
-            "perfWndw": r.perfWndwNum,
+            "perfWndwNum": r.perfWndwNum,
             "PerfStart": r.PerfStart,
             "PerfEnd": r.PerfEnd,
             "bkTstStart": r.bkTstStart,
@@ -138,7 +138,7 @@ def build_overview_table(
             row[value_field] = getattr(r, value_field)
         rows.append(row)
 
-    columns = ["Model", "perfWndw", "PerfStart", "PerfEnd", "bkTstStart", "bkTstEnd"]
+    columns = ["Model", "perfWndwNum", "PerfStart", "PerfEnd", "bkTstStart", "bkTstEnd"]
     if include_nonzero_wts:
         columns.append("Non-Zero Wts")
     columns.extend(VALUE_FIELDS)

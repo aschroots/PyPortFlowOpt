@@ -270,7 +270,7 @@ def test_build_overview_table_lng_column_order_and_non_zero_wts():
     table = build_overview_table(records, "Lng", _CATALOG_ORDER)
     assert list(table.columns) == [
         "Model",
-        "perfWndw",
+        "perfWndwNum",
         "PerfStart",
         "PerfEnd",
         "bkTstStart",
@@ -283,7 +283,7 @@ def test_build_overview_table_lng_column_order_and_non_zero_wts():
     assert simp_row["Non-Zero Wts"] == pytest.approx(2.0)
     capm_row = table[table["Model"] == "CAPM"].iloc[0]
     assert capm_row["Non-Zero Wts"] == pytest.approx(1.0)
-    assert simp_row["perfWndw"] == 1
+    assert simp_row["perfWndwNum"] == 1
 
 
 def test_build_overview_table_shrt_omits_non_zero_wts_column():
@@ -291,7 +291,7 @@ def test_build_overview_table_shrt_omits_non_zero_wts_column():
     table = build_overview_table(records, "Shrt", _CATALOG_ORDER)
     assert list(table.columns) == [
         "Model",
-        "perfWndw",
+        "perfWndwNum",
         "PerfStart",
         "PerfEnd",
         "bkTstStart",
@@ -315,5 +315,5 @@ def test_build_overview_table_filters_by_portfolio_type_and_preserves_row_order(
         _record(2, "Simp", "Lng", weights={"AAA": 1.0}),
     ]
     table = build_overview_table(records, "Lng", _CATALOG_ORDER)
-    pairs = list(zip(table["perfWndw"], table["Model"], strict=True))
+    pairs = list(zip(table["perfWndwNum"], table["Model"], strict=True))
     assert pairs == [(1, "Simp"), (1, "CAPM"), (2, "Simp")]
