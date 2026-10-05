@@ -235,7 +235,8 @@ def test_golden_path_no_bcktest_run_has_all_real_columns_nan(fixtures_dir, tmp_p
 
     assert "nPerfWindows" in result.summary_text
     assert "nBacktests" not in result.summary_text
-    assert "Output Summary:" not in result.summary_text
+    assert f"  Outputs Location: {output_dir.resolve()}" in result.summary_text
+    assert "max YrExpShrp" not in result.summary_text
 
     lng_pmod_pval = pd.read_csv(output_dir / "OptResultsLngPmodPval.csv")
     assert lng_pmod_pval["SimpYrRealR"].isna().all()

@@ -442,6 +442,7 @@ def run(
         factor_date_ranges,
         records,
         catalog_order,
+        output_dir,
     )
     run_summary_path = output_dir / f"run_summary_{timestamp_str}.log"
     write_run_summary(run_summary_path, rendered_summary)

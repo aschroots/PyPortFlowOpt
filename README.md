@@ -200,10 +200,11 @@ Written into `--output-dir/runOpt_YYYYMMDD_HHMMSS/` (see the note above):
 - `run.log` — full DEBUG-level trace of the run (root logger, so `cvxpy`/`pyportfolioopt`
   solver warnings are captured too).
 - `run_summary_YYYYMMDD_HHMMSS.log` — a `PyPortFlowOpt Run Summary` title followed by
-  `Configuration`, `Input Securities Summary`, `Input Factors Summary`, and (when
-  `doBcktest: true`) `Output Summary` sections (per-model max Sharpe ratio and its window,
-  plus mean/stdev of `YrDelExpReal` and, if a market proxy is configured, `YrPremRealMkt`,
-  across all backtest windows), plus any `Notes`/`Flags` raised during the run (e.g. a ticker
+  `Configuration`, `Input Securities Summary`, `Input Factors Summary`, and `Output Summary`
+  sections. `Output Summary` always opens with `Outputs Location: <full path>` (the absolute
+  path of the output folder); when `doBcktest: true` it then lists per-model max Sharpe ratio
+  and its window, plus mean/stdev of `YrDelExpReal` and, if a market proxy is configured,
+  `YrPremRealMkt`, across all backtest windows. These are followed by any `Notes`/`Flags` raised during the run (e.g. a ticker
   excluded from a window's coverage, or an optimization that failed because no asset beat the
   risk-free rate).
 

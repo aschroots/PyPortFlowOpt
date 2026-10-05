@@ -41,9 +41,8 @@ class RunSummary:
     """Accumulates informational notes and validation flags for the timestamped
     run_summary_YYYYMMDD_HHMMSS.log. Ported from PyPortFlow2's logging_utils.py:RunSummary
     with two formatting fixes: the title underline is self-computed ("=" * len(title))
-    rather than a hardcoded length, and every section header uses a consistent trailing
-    colon (PyPortFlow2's own two summary sections are inconsistent with each other on
-    this point)."""
+    rather than a hardcoded length, and section headers are bare flush-left names with no
+    trailing colon, matching PyPortFlow1's summary log."""
 
     def __init__(self) -> None:
         self._notes: list[str] = []
@@ -70,10 +69,11 @@ class RunSummary:
         factor_date_ranges: dict[str, tuple[pd.Timestamp, pd.Timestamp]],
         records: Sequence[OptimizationRecord],
         catalog_order: Sequence[str],
+        output_dir: Path,
     ) -> str:
         lines = [_TITLE, "=" * len(_TITLE), ""]
 
-        lines.append("Configuration:")
+        lines.append("Configuration")
         lines.append(f"  Input File: {config_path.name}")
         for field_name in _CONFIG_FIELDS_TO_RENDER:
             lines.append(f"  {field_name} = {_render_config_field(config, field_name)}")
@@ -88,7 +88,7 @@ class RunSummary:
             lines.append(f"  nPerfWindows = {window_plan.n_perf_windows}")
         lines.append("")
 
-        lines.append("Input Securities Summary:")
+        lines.append("Input Securities Summary")
         lines.append(f"  Input File: {securities_path.name}")
         lines.append(f"  Detected periods per year: {periods_per_year}")
         lines.append(f"  tickerCount = {ticker_count}")
@@ -97,27 +97,28 @@ class RunSummary:
         lines.append(f"  nPerfRows = {n_perf_rows}")
         lines.append("")
 
-        lines.append("Input Factors Summary:")
+        lines.append("Input Factors Summary")
         lines.append(f"  Input File: {factors_path.name}")
         lines.append(f"  Detected periods per year: {factor_periods_per_year}")
         for name, (oldest, newest) in factor_date_ranges.items():
             lines.append(f"  {name}: {oldest.date()} to {newest.date()}")
         lines.append("")
 
+        # Always rendered (every run writes outputs), led by the output folder's full path;
+        # the per-model backtest stats only follow when doBcktest is on.
+        lines.append("Output Summary")
+        lines.append(f"  Outputs Location: {output_dir.resolve()}")
         if config.doBcktest:
-            output_summary_lines = _render_output_summary(config, records, catalog_order)
-            if output_summary_lines:
-                lines.append("Output Summary:")
-                lines.extend(output_summary_lines)
-                lines.append("")
+            lines.extend(_render_output_summary(config, records, catalog_order))
+        lines.append("")
 
         if self._notes:
-            lines.append("Notes:")
+            lines.append("Notes")
             lines.extend(f"  - {n}" for n in self._notes)
             lines.append("")
 
         if self._flags:
-            lines.append("Flags:")
+            lines.append("Flags")
             lines.extend(f"  - {f}" for f in self._flags)
             lines.append("")
 

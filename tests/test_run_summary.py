@@ -71,6 +71,7 @@ def _render(config, records, **kwargs):
         {"Mkt-RF": (pd.Timestamp("2020-01-01"), pd.Timestamp("2020-12-01"))},
         records,
         _CATALOG_ORDER,
+        Path("out"),
         **kwargs,
     )
 
@@ -83,10 +84,11 @@ def test_title_and_self_computed_underline():
     assert len(lines[1]) == len(lines[0])
 
 
-def test_section_headers_have_consistent_trailing_colon():
-    rendered = _render(_config(), [_record(1, "Simp", YrExpShrp=1.0)])
-    for header in ("Configuration:", "Input Securities Summary:", "Input Factors Summary:"):
-        assert header in rendered
+def test_section_headers_have_no_trailing_colon():
+    lines = _render(_config(), [_record(1, "Simp", YrExpShrp=1.0)]).splitlines()
+    for header in ("Configuration", "Input Securities Summary", "Input Factors Summary", "Output Summary"):
+        assert header in lines
+        assert f"{header}:" not in lines
 
 
 def test_market_proxy_none_renders_as_none_literal():
@@ -113,11 +115,13 @@ def test_do_bcktest_true_renders_n_backtests_and_output_summary():
     )
     assert "nBacktests = 4" in rendered
     assert "anchored" in rendered.lower()
-    assert "Output Summary:" in rendered
-    assert "Simp Long: max YrExpShrp" in rendered
+    lines = rendered.splitlines()
+    i = lines.index("Output Summary")
+    assert lines[i + 1] == f"  Outputs Location: {Path('out').resolve()}"
+    assert lines[i + 2].startswith("  Simp Long: max YrExpShrp")
 
 
-def test_do_bcktest_false_renders_n_perf_windows_and_no_output_summary():
+def test_do_bcktest_false_renders_n_perf_windows_and_location_only_output_summary():
     config = _config(doBcktest=False, bckTestWndw=None, marketProxyTicker=None, marketProxyName=None)
     window_plan = WindowPlan(
         windows=(Window(1, 1, 10, None, None, False),), n_backtests=None, n_perf_windows=3, is_anchored=False
@@ -125,7 +129,11 @@ def test_do_bcktest_false_renders_n_perf_windows_and_no_output_summary():
     rendered = _render(config, [_record(1, "Simp", YrExpShrp=1.5)], window_plan=window_plan)
     assert "nPerfWindows = 3" in rendered
     assert "nBacktests" not in rendered
-    assert "Output Summary:" not in rendered
+    # Output Summary still appears (for the output location) but has no backtest stats.
+    lines = rendered.splitlines()
+    i = lines.index("Output Summary")
+    assert lines[i + 1 :] == [f"  Outputs Location: {Path('out').resolve()}"]
+    assert "max YrExpShrp" not in rendered
 
 
 def test_output_summary_omits_market_proxy_stats_when_unconfigured():
@@ -157,8 +165,9 @@ def test_notes_and_flags_sections_render_accumulated_messages():
         {},
         [],
         _CATALOG_ORDER,
+        Path("out"),
     )
-    assert "Notes:" in rendered
+    assert "Notes" in rendered
     assert "  - a note" in rendered
-    assert "Flags:" in rendered
+    assert "Flags" in rendered
     assert "  - a flag" in rendered
